@@ -1,28 +1,14 @@
-terraform {
-  required_providers {
-    aws = {
-      source = "hashicorp/aws"
-      version = "5.36.0"
-    }
-  }
-}
-
-# Configure the AWS Provider
-provider "aws" {
-  region = "us-east-1"
-}
-
 data "aws_vpc" "main" {
-  id = "vpc-054224cfe771ed5c8"
+  id = var.vpc_id
 }
 
 resource "aws_key_pair" "deployer" {
   key_name   = "deployer-key"
-  public_key = "ssh-rsa key"
+  public_key = var.public_key
 }
 
 data "template_file" "user_data" {
-  template = file("./userdata.yaml")
+  template = file("${abspath(path.module)}/userdata.yaml")
 }
 
 resource "aws_security_group" "sg_myserver" {
@@ -47,7 +33,7 @@ resource "aws_security_group" "sg_myserver" {
       from_port        = 22
       to_port          = 22
       protocol         = "tcp"
-      cidr_blocks      = ["${ip-address}/32"]
+      cidr_blocks      = [var.cidr_ip]
       ipv6_cidr_blocks = []
       prefix_list_ids  = []
       security_groups  = []
@@ -66,24 +52,34 @@ resource "aws_security_group" "sg_myserver" {
   }
 }
 
+data "aws_ami" "amazon-linux-2" {
+  most_recent = true
+  filter {
+    name   = "owner-alias"
+    values = ["amazon"]
+  }
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm*"]
+  }
+}
+
 resource "aws_instance" "myserver" {
-  ami                    = "ami-0a3c3a20c09d6f377"
-  instance_type          = "t2.micro"
-  key_name               = aws_key_pair.deployer.key_name
+  ami                    = "${data.aws_ami.amazon-linux-2.id}"
+  instance_type          = var.instance_type
+  key_name               = "${aws_key_pair.deployer.key_name}"
   vpc_security_group_ids = [aws_security_group.sg_myserver.id]
   user_data              = data.template_file.user_data.rendered
-  provisioner "file" {
-    content = "mars"
-    destination = "/home/ec2-user/barson.txt"
-    connection {
-      type = "ssh"
-      user = "ec2-user"
-      host = "${self.public_ip}"
-      private_key = "${file("/root/.ssh/terraform")}"
-    }
-  }
   tags = {
-    Name = "myserver"
+    Name = var.server_name
+  }
+}
+
+resource "aws_instance" "east_server" {
+  ami           = "${data.aws_ami.amazon-linux-2.id}"
+  instance_type = "t2.micro"
+  tags = {
+    name = "server_east"
   }
 }
 
@@ -96,6 +92,3 @@ resource "null_resource" "status" {
   ]
 }
 
-output "public_ip" {
-  value = aws_instance.myserver.public_ip
-}
